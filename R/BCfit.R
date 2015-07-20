@@ -1,23 +1,31 @@
 BCfit <-
-function(y, X, covlist, R, z, mu, updateR, iters, thin = 1, burn = 0, priW = c(nrow(z) + 2 * ncol(z), 2 * ncol(z))) {
+function(y, X, covlist, R, z, mu, updateR, iters, thin = 1, burn = 0, priW = c(nrow(z) + 2 * ncol(z), 2 * ncol(z)), verbose = 0) {
   
   spnames <- colnames(y)
-  y <- t(y)
-  nsp <- dim(y)[1]
-  n <- dim(y)[2]
-  iR <- solve(R)
-  e <- z - mu
+  y <- t(y)         # NOTE: y is transposed relative to the input!
+  nsp <- dim(y)[1]  # number of species
+  n <- dim(y)[2]    # number of sites
+  iR <- solve(R)    # Inverse correlation matrix
+  e <- z - mu       # component of z that can't be explained by mu
   
-  # set up trace arrays
   nsamp <- (iters - burn) %/% thin
-  trace_R <- array(NA, dim = c(nsamp, ((nsp * nsp - nsp) / 2))) #w /out redundant columns
-  trace_z <- array(NA, dim = c(nsamp, n, nsp))
-  trace_mu <- trace_z
-  trace_B <- NULL
+  
+  # Dave asks: Should mu be in the output as well? It wasn't before, but that 
+  #    may have been an oversight.
+  # Nick: It's not needed since it's just X %*% B, we could
+  #   store it for convenience but I doubt it's worth the memory used
+  output <- list(
+    R = array(NA, dim = c(nsamp, ((nsp * nsp - nsp) / 2))),
+    B = NULL, 
+    z = array(NA, dim = c(nsamp, n, nsp)), 
+    burn = burn, 
+    thin = thin
+  )
+  
   for (i in 1:nsp) {
     temp <- matrix(NA, nsamp, length(covlist[[i]]))
     colnames(temp) <- colnames(X)[covlist[[i]]]
-    trace_B[[spnames[i]]] <- temp
+    output$B[[spnames[i]]] <- temp
   }
   rm(temp)
   
@@ -28,11 +36,11 @@ function(y, X, covlist, R, z, mu, updateR, iters, thin = 1, burn = 0, priW = c(n
     }
   }
   
-  colnames(trace_R) <- nam[which(upper.tri(diag(nsp)))]
-  dimnames(trace_z)[[3]] <- spnames
-  dimnames(trace_mu)[[3]] <- spnames
+  colnames(output$R) <- nam[which(upper.tri(diag(nsp)))]
+  dimnames(output$z)[[3]] <- spnames
   
   # start sampler
+  rec <- 0 # counter for record number after burn-in and thinning
   start <- Sys.time()
   for (iter in 1:iters) {
     
@@ -52,17 +60,26 @@ function(y, X, covlist, R, z, mu, updateR, iters, thin = 1, burn = 0, priW = c(n
       iR <- chol2inv(chol(R))
     }
     
-    # record parameters    
+    if(verbose == 2){
+      message(iter)
+    }
+    if(verbose > 0 & iter == burn){
+      message("burn-in complete")
+    }
+    
+    # record parameters
     if (iter %% thin == 0 & iter > burn) {
-      rec <- (iter - burn) %/% thin
-      trace_R[rec, ] <- R[upper.tri(R)]
-      trace_z[rec, , ] <- z
-      trace_mu[rec, , ] <- mu
+      if(verbose == 1){
+        message(iter)
+      }
+      rec <- rec + 1
+      output$R[rec, ] <- R[upper.tri(R)]
+      output$z[rec, , ] <- z
       for (i in 1:nsp) {
-        trace_B[[i]][rec, ] <- mulis[[2]][[i]] 
+        output$B[[i]][rec, ] <- mulis[[2]][[i]] 
       }
     }
   }  # sampler
   
-  list(R = trace_R, B = trace_B, z = trace_z, burn = burn, thin = thin)
+  output
 }
